@@ -32,6 +32,9 @@ modules:
       - mkdir -p /app/bin/airi
       - cp -r ./* /app/bin/airi/
       - install airi.sh /app/bin/airi.sh
+      - install -Dm644 ai.moeru.airi.desktop /app/share/applications/ai.moeru.airi.desktop
+      - install -Dm644 ai.moeru.airi.png /app/share/icons/hicolor/512x512/apps/ai.moeru.airi.png
+      - install -Dm644 ai.moeru.airi.svg /app/share/icons/hicolor/scalable/apps/ai.moeru.airi.svg
       - chmod +x /app/bin/airi/airi.sh
       - chmod +x /app/bin/airi/airi
     sources:
@@ -41,6 +44,14 @@ modules:
       - type: dir
         only-arches: [aarch64]
         path: dist/linux-arm64-unpacked
+      - type: file
+        path: ai.moeru.airi.desktop
+      - type: file
+        path: resources/icon-512.png
+        dest-filename: ai.moeru.airi.png
+      - type: file
+        path: resources/icon.svg
+        dest-filename: ai.moeru.airi.svg
       # First discovered by [@gg582](https://github.com/gg582) in https://github.com/moeru-ai/airi/pull/647
       #
       # Without the correct zypak-wrapper, application launch will result in this error:
