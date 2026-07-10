@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url'
 import clickDragPlugin from 'electron-click-drag-plugin'
 
 import { is } from '@electron-toolkit/utils'
+import { useLogg } from '@guiiai/logg'
 import { defineInvokeHandler } from '@moeru/eventa'
 import { createContext } from '@moeru/eventa/adapters/electron/main'
 import { initScreenCaptureForWindow } from '@proj-airi/electron-screen-capture/main'
@@ -35,6 +36,7 @@ import { baseUrl, getElectronMainDirname, load } from '../../libs/electron/locat
 import { createConfig } from '../../libs/electron/persistence'
 import { transparentWindowConfig } from '../shared'
 import { setupMainWindowElectronInvokes } from './rpc/index.electron'
+import { applyMainWindowDisplayMode, ordinaryMainWindowConfig, selectMainWindowDisplayMode } from './window-policy'
 
 const appConfigSchema = object({
   windows: optional(array(object({
@@ -48,6 +50,8 @@ const appConfigSchema = object({
 })
 
 type AppConfig = InferOutput<typeof appConfigSchema>
+
+const log = useLogg('main-window').useGlobalConfig()
 
 export async function setupMainWindow(params: {
   settingsWindow: SettingsWindowManager
@@ -76,6 +80,19 @@ export async function setupMainWindow(params: {
   setupConfig()
 
   const mainWindowConfig = getConfig().windows?.find(w => w.title === 'AIRI' && w.tag === 'main')
+  const displayMode = selectMainWindowDisplayMode(env)
+  const surfaceOptions = displayMode === 'ordinary-window'
+    ? ordinaryMainWindowConfig()
+    : {
+        // Thanks to [@HeartArmy](https://github.com/HeartArmy) for the tip implementation.
+        //
+        // https://github.com/electron/electron/issues/10078#issuecomment-3410164802
+        // https://stackoverflow.com/questions/39835282/set-browserwindow-always-on-top-even-other-app-is-in-fullscreen-electron-mac
+        type: 'panel' as const,
+        ...transparentWindowConfig(),
+      }
+
+  log.withFields({ displayMode }).log('creating main window')
 
   const window = new BrowserWindow({
     title: 'AIRI',
@@ -89,12 +106,7 @@ export async function setupMainWindow(params: {
       preload: join(dirname(fileURLToPath(import.meta.url)), '../preload/index.mjs'),
       sandbox: false,
     },
-    // Thanks to [@HeartArmy](https://github.com/HeartArmy) for the tip implementation.
-    //
-    // https://github.com/electron/electron/issues/10078#issuecomment-3410164802
-    // https://stackoverflow.com/questions/39835282/set-browserwindow-always-on-top-even-other-app-is-in-fullscreen-electron-mac
-    type: 'panel',
-    ...transparentWindowConfig(),
+    ...surfaceOptions,
   })
 
   if (params.onWindowCreated) {
@@ -159,18 +171,30 @@ export async function setupMainWindow(params: {
     window.hide()
   })
 
-  // Thanks to [@HeartArmy](https://github.com/HeartArmy) for the tip implementation.
-  //
-  // https://github.com/electron/electron/issues/10078#issuecomment-3410164802
-  // https://stackoverflow.com/questions/39835282/set-browserwindow-always-on-top-even-other-app-is-in-fullscreen-electron-mac
-  window.setAlwaysOnTop(true, 'screen-saver', 1)
-  window.setFullScreenable(false)
-  window.setVisibleOnAllWorkspaces(true)
+  applyMainWindowDisplayMode(window, displayMode)
   if (isMacOS) {
     window.setWindowButtonVisibility(false)
   }
 
-  window.on('ready-to-show', () => window!.show())
+  window.on('ready-to-show', () => {
+    log.withFields({ displayMode }).log('main window ready to show')
+    window.show()
+  })
+  window.on('show', () => {
+    log.withFields({ displayMode, visible: window.isVisible() }).log('main window shown')
+  })
+  window.webContents.on('did-finish-load', () => {
+    log.withFields({ displayMode }).log('main window renderer finished loading')
+  })
+  window.webContents.on('did-fail-load', (_, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    log.withFields({ displayMode, errorCode, errorDescription, validatedURL, isMainFrame }).error('main window renderer failed to load')
+  })
+  window.webContents.on('render-process-gone', (_, details) => {
+    log.withFields({ displayMode, reason: details.reason, exitCode: details.exitCode }).error('main window renderer process gone')
+  })
+  window.on('unresponsive', () => {
+    log.withFields({ displayMode }).warn('main window became unresponsive')
+  })
   window.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
     return { action: 'deny' }
